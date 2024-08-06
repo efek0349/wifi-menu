@@ -12,7 +12,7 @@ INT=$1
 WIFI_DIR="/etc/wifi_saved"
 
 if [ "$(id -u)" != "0" ]; then
-    echo -ne "[!] ${RED}This script must be run as root\n${RST}"
+    echo -ne "[!] ${RED}This script needs to be run as root.\n${RST}"
     exit
 fi
 
@@ -27,7 +27,7 @@ read_saved() {
 
     SAVED_LIST=$(ls -h $WIFI_DIR)
            if [ -z "${SAVED_LIST[0]}" ]; then
-                 echo -ne "[!] ${YLW}There are no previous saved wifi connections\n${RST}"
+                 echo -ne "[!] ${YLW}No previous WiFi connections found.\n${RST}"
                  conf_create
            fi
 
@@ -44,8 +44,7 @@ read_saved() {
         file[i]=$j
         i=$(( i + 1 ))
     done
-
-    echo -ne "[+] ${BLU}Choose a previously saved wifi connection or ${YLW}\"Enter\" ${BLU}to skip: ${RST}"
+    echo -ne "[+] ${BLU}Select a previously saved WiFi connection or press ${YLW}\"Enter\" ${BLU}to skip: ${RST}"
     read v_CHOOSELIST
 
     if [ -z "${file[$v_CHOOSELIST]}" ];then
@@ -80,15 +79,14 @@ conf_create() {
        i=$(( i + 1 ))
     done
 
-    echo -ne "[+] ${BLU}Choose wifi connection or ${YLW}\"Enter\" ${BLU}to quit: ${RST}"
+    echo -ne "[+] ${BLU}Select a WiFi connection or press ${YLW}\"Enter\" ${BLU}to exit: ${RST}"
     read i_CHOOSELIST
 
     if [ -z "${list[$i_CHOOSELIST]}" ]; then
         echo -ne "[!] ${RED}Exiting\n${RST}"
         exit
     fi
-
-        echo -ne "[+] ${BLU}Enter the passphrase for ${YLW}\"${list[$i_CHOOSELIST]}\"?\n${RST}"
+        echo -ne "[+] ${BLU}Please enter the passphrase for ${YLW}\"${list[$i_CHOOSELIST]}\"?\n${RST}"
         echo -ne "[+] Password: "
         stty -echo
         read  PASSWORD
@@ -99,27 +97,26 @@ conf_create() {
         exit
     fi
 
-echo "-inet6 -bssid -chan -nwid -nwkey -wpa -wpakey
-nwid \"${list[$i_CHOOSELIST]}\" lladdr \"random\"
-wpakey \"$PASSWORD\"
+echo "lladdr random join ${list[$i_CHOOSELIST]} wpakey $PASSWORD
+inet autoconf
 up" > "$WIFI_DIR/${list[$i_CHOOSELIST]}.$INT" | xargs
 chmod 600 $WIFI_DIR/${list[$i_CHOOSELIST]}.$INT
 
-    echo -ne "[+] ${BLU}Creating new configuration using ${YLW}\"${list[$i_CHOOSELIST]}\"\n${RST}"
+    echo -ne "[+] ${BLU}Creating new configuration for the ${YLW}\"${list[$i_CHOOSELIST]}\"${RST}${BLU} wireless network.\n${RST}"
     connect "${list[$i_CHOOSELIST]}"
 }
 
 saved_connect() {
-    echo -ne "[+] ${BLU}Connecting using file ${YLW}\"${file[$v_CHOOSELIST]}\"${RST}\n"
+    echo -ne "[+] ${BLU}Connecting using the ${YLW}\"${file[$v_CHOOSELIST]}\"${RST}${BLU} configuration file.${RST}\n"
     /sbin/ifconfig $INT up
     /usr/bin/pkill dhcpleasectl
-    /sbin/ifconfig $INT nwid "$(grep nwid "$WIFI_DIR/${file[$v_CHOOSELIST]}" | tail -1 |
-            cut -d\" -f2 )" wpakey "$(grep  wpakey "$WIFI_DIR/${file[$v_CHOOSELIST]}"  |
-            tail -1| cut -d\" -f2)"
+    /sbin/ifconfig $INT lladdr random nwid "$(grep join "$WIFI_DIR/${file[$v_CHOOSELIST]}" | head -1 |
+            awk '{print $4}' )" wpakey "$(grep  wpakey "$WIFI_DIR/${file[$v_CHOOSELIST]}"  |
+            head -1| awk '{print $6}')"
     /bin/cp "$WIFI_DIR/${file[$v_CHOOSELIST]}" /etc/hostname.$INT
-    echo -ne "[+] ${BLU}Configured interface ${YLW}$INT${BLU}; ESSID is ${YLW}\"${file[$v_CHOOSELIST]}\"${RST}"
-    echo -ne "\n[+] ${BLU}Interface ${YLW}$INT${BLU} is up${RST}\n"
-    echo -ne "[+] ${BLU}Running ${YLW}dhclient\n${RST}"
+    echo -ne "[+] ${BLU}Interface ${YLW}$INT${BLU} has been configured the ESSID is ${YLW}\"${file[$v_CHOOSELIST]}\"${RST}"
+    echo -ne "\n[+] ${BLU}Interface ${YLW}$INT${BLU} is now up${RST}\n"
+    echo -ne "[+] ${BLU}Running ${YLW}dhcpleasectl\n${RST}"
     /usr/sbin/dhcpleasectl $INT
 	if [[ $(rcctl ls all|grep dnscrypt_proxy) == *dnscrypt* ]];then
 		/usr/sbin/rcctl restart dnscrypt_proxy unbound
@@ -135,10 +132,10 @@ connect() {
     /sbin/ifconfig $INT up
     /usr/bin/pkill dhcpleasectl
     /bin/cp "$WIFI_DIR/${list[$i_CHOOSELIST]}.$INT" /etc/hostname.$INT
-    echo -ne "[+] ${BLU}Configured interface ${YLW}$INT${BLU}; ESSID is ${YLW}\"$ESSID\"${RST}"
-    /sbin/ifconfig $INT nwid "$ESSID" wpakey "$PASSWORD"
-    echo -ne "\n[+] ${BLU}Interface ${YLW}$INT${BLU} is up${RST}\n"
-    echo -ne "[+] ${BLU}Running ${YLW}dhclient${RST}\n"
+    echo -ne "[+] ${BLU}Interface ${YLW}$INT${BLU} has been configured the ESSID is ${YLW}\"$ESSID\"${RST}"
+    /sbin/ifconfig $INT lladdr random nwid "$ESSID" wpakey "$PASSWORD"
+    echo -ne "\n[+] ${BLU}Interface ${YLW}$INT${BLU} is now up${RST}\n"
+    echo -ne "[+] ${BLU}Running ${YLW}dhcpleasectl${RST}\n"
     /usr/sbin/dhcpleasectl $INT
 	if [[ $(rcctl ls all|grep dnscrypt_proxy) == *dnscrypt* ]];then
 		/usr/sbin/rcctl restart dnscrypt_proxy unbound
@@ -151,11 +148,11 @@ connect() {
 ### wifite.py ###
 clear
 echo -ne "$GRN   .;'                     \`;,            \n"
-echo -ne "$GRN  .;'  ,;'             \`;,  \`;,    OpenBSD wireless network manager\n"
-echo -ne "$GRN .;'  ,;'  ,;'     \`;,  \`;,  \`;,        \n"
-echo -ne "$GRN ::   ::   :   $GRY( ) $GRN  :   ::   ::   \n"
-echo -ne "$GRN ':.  ':.  ':. $GRY/_\\ $GRN,:'  ,:'  ,:'  \n"
-echo -ne "$GRN  ':.  ':.    $GRY/___\\ $GRN   ,:'  ,:'   \n"
+echo -ne "$GRN  .;'  ,;'             \`;,  \`;,    OpenBSD Wireless Network Management Script\n"
+echo -ne "$GRN .;'  ,;'  ,;'     \`;,  \`;,  \`;,   OS      :$RST`uname -srm`\n"
+echo -ne "$GRN ::   ::   :   $GRY( ) $GRN  :   ::   ::   SHELL   :$RST${SHELL##*/}   \n"
+echo -ne "$GRN ':.  ':.  ':. $GRY/_\\ $GRN,:'  ,:'  ,:'   TERM    :$RST$TERM  \n"
+echo -ne "$GRN  ':.  ':.    $GRY/___\\ $GRN   ,:'  ,:'    PC      :$RST`sysctl -n hw.vendor` `sysctl -n hw.product`\n"
 echo -ne "$GRN   ':.       $GRY/_____\\ $GRN     ,:'     \n"
 echo -ne "$GRN            $GRY/       \\ $GRN    ${RST}\n\n"
 

@@ -1,15 +1,16 @@
-# OpenBSD Wireless Network Manager
+# OpenBSD Wireless Network Management Script
 
 Usage :
 	$ doas ./wifi-menu <interface\>
 ```
-  .;'  ,;'             `;,  `;,    OpenBSD wireless network manager
- .;'  ,;'  ,;'     `;,  `;,  `;,
- ::   ::   :   ( )   :   ::   ::
- ':.  ':.  ':. /_\ ,:'  ,:'  ,:'
-  ':.  ':.    /___\    ,:'  ,:'
-   ':.       /_____\      ,:'
-            /       \ 
+   .;'                     `;,            
+  .;'  ,;'             `;,  `;,    OpenBSD Wireless Network Management Script
+ .;'  ,;'  ,;'     `;,  `;,  `;,   OS      :OpenBSD 7.5 amd64
+ ::   ::   :   ( )   :   ::   ::   SHELL   :ksh   
+ ':.  ':.  ':. /_\ ,:'  ,:'  ,:'   TERM    :rxvt-256color  
+  ':.  ':.    /___\    ,:'  ,:'    PC      :LENOVO 20KN007
+   ':.       /_____\      ,:'     
+            /       \     
 
 1) Normal.iwn0         2) Test.iwn0             7) Raspi3.iwn0
 2) Privacy.iwn0        3) Android.iwn0
