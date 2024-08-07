@@ -114,6 +114,7 @@ saved_connect() {
             awk '{print $4}' )" wpakey "$(grep  wpakey "$WIFI_DIR/${file[$v_CHOOSELIST]}"  |
             head -1| awk '{print $6}')"
     /bin/cp "$WIFI_DIR/${file[$v_CHOOSELIST]}" /etc/hostname.$INT
+    /bin/chmod 0600 /etc/hostname.$INT
     echo -ne "[+] ${BLU}Interface ${YLW}$INT${BLU} has been configured the ESSID is ${YLW}\"${file[$v_CHOOSELIST]}\"${RST}"
     echo -ne "\n[+] ${BLU}Interface ${YLW}$INT${BLU} is now up${RST}\n"
     echo -ne "[+] ${BLU}Running ${YLW}dhcpleasectl\n${RST}"
@@ -132,6 +133,7 @@ connect() {
     #/sbin/ifconfig $INT up
     /usr/bin/pkill dhcpleasectl
     /bin/cp "$WIFI_DIR/${list[$i_CHOOSELIST]}.$INT" /etc/hostname.$INT
+    /bin/chmod 0600 /etc/hostname.$INT
     echo -ne "[+] ${BLU}Interface ${YLW}$INT${BLU} has been configured the ESSID is ${YLW}\"$ESSID\"${RST}"
     /sbin/ifconfig $INT nwid "$ESSID" wpakey "$PASSWORD lladdr random up"
     echo -ne "\n[+] ${BLU}Interface ${YLW}$INT${BLU} is now up${RST}\n"
