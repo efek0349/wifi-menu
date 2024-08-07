@@ -28,7 +28,7 @@ Usage :
 [+] Connecting using file "Android1"
 [+] Configured interface iwm0; ESSID is "Android1"
 [+] Interface iwm0 is up
-[+] Running dhclient
+[+] Running dhcpleasectl
 ....
 iwm0 [Bound]
 	inet 192.168.1.104 netmask 255.255.255.0
