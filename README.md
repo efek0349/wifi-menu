@@ -12,9 +12,9 @@ Usage :
    ':.       /_____\      ,:'     
             /       \     
 
-1) Normal.iwn0         2) Test.iwn0             7) Raspi3.iwn0
-2) Privacy.iwn0        3) Android.iwn0
-3) MyVPN.iwn0          4) CryptoLab.iwn0
+1) Normal.iwm0         2) Test.iwm0             7) Raspi3.iwm0
+2) Privacy.iwm0        3) Android.iwm0
+3) MyVPN.iwm0          4) CryptoLab.iwm0
 
 [+] Choose a previously saved wifi connection or "Enter" to skip:
 1) Android1        4) Wifi4          7) Wifi7
@@ -26,8 +26,8 @@ Usage :
 [+] Password:
 [+] Creating new configuration using "Android1"
 [+] Connecting using file "Android1"
-[+] Configured interface iwn0; ESSID is "Android1"
-[+] Interface iwn0 is up
+[+] Configured interface iwm0; ESSID is "Android1"
+[+] Interface iwm0 is up
 [+] Running dhclient
 ....
 iwm0 [Bound]
