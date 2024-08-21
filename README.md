@@ -43,7 +43,7 @@ unbound(ok)
 
 # alias
 
-### alias conn-cryptolab='printf "1\n"| wifi-menu'
+### alias conn-cryptolab='printf "4\n"| wifi-menu'
 
 ```
 $ printf "4\n"| doas /usr/local/bin/wifi-menu iwm0
