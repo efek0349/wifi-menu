@@ -57,8 +57,7 @@ read_saved() {
 
 conf_create() {
     #/sbin/ifconfig $INT -nwid -nwkey -wpakey down > /dev/null 2>&1
-    /sbin/ifconfig $INT up
-    /usr/bin/pkill dhcpleasectl
+    /sbin/ifconfig $INT lladdr random up
     LIST=$(/sbin/ifconfig $INT scan 2>/dev/null |
                             sed -ne 's/^.*nwid \(.*\) chan .*$/\1/p' | tr -d \" | sed '/^$/d' | sort | uniq )
     i=1
@@ -109,8 +108,7 @@ chmod 600 $WIFI_DIR/${list[$i_CHOOSELIST]}.$INT
 
 saved_connect() {
     echo -ne "[+] ${BLU}Connecting using the ${YLW}\"${file[$v_CHOOSELIST]}\"${RST}${BLU} configuration file.${RST}\n"
-    /sbin/ifconfig $INT up
-    /usr/bin/pkill dhcpleasectl
+    /sbin/ifconfig $INT lladdr random up
     /sbin/ifconfig $INT lladdr random nwid "$(grep join "$WIFI_DIR/${file[$v_CHOOSELIST]}" | head -1 |
             awk '{print $4}' )" wpakey "$(grep  wpakey "$WIFI_DIR/${file[$v_CHOOSELIST]}"  |
             head -1| awk '{print $6}')"
@@ -121,9 +119,9 @@ saved_connect() {
     echo -ne "[+] ${BLU}Running ${YLW}dhcpleasectl\n${RST}"
     /usr/sbin/dhcpleasectl $INT
 	if [[ $(rcctl ls all|grep dnscrypt_proxy) == *dnscrypt* ]];then
-		/usr/sbin/rcctl restart dnscrypt_proxy unbound
+		/usr/sbin/rcctl restart dnscrypt_proxy unbound dhcpleased
     else 
-		/usr/sbin/rcctl restart unbound
+		/usr/sbin/rcctl restart unbound dhcpleased
 	fi
     exit
 }
@@ -131,8 +129,7 @@ saved_connect() {
 connect() {
     ESSID=$*
     echo -ne "[+] ${BLU}Connecting using file ${YLW}\"$ESSID\"${RST}\n"
-    #/sbin/ifconfig $INT up
-    /usr/bin/pkill dhcpleasectl
+    /sbin/ifconfig $INT lladdr random up
     /bin/cp "$WIFI_DIR/${list[$i_CHOOSELIST]}.$INT" /etc/hostname.$INT
     /bin/chmod 0600 /etc/hostname.$INT
     echo -ne "[+] ${BLU}Interface ${YLW}$INT${BLU} has been configured the ESSID is ${YLW}\"$ESSID\"${RST}"
@@ -141,9 +138,9 @@ connect() {
     echo -ne "[+] ${BLU}Running ${YLW}dhcpleasectl${RST}\n"
     /usr/sbin/dhcpleasectl $INT
 	if [[ $(rcctl ls all|grep dnscrypt_proxy) == *dnscrypt* ]];then
-		/usr/sbin/rcctl restart dnscrypt_proxy unbound
+		/usr/sbin/rcctl restart dnscrypt_proxy unbound dhcpleased
     else 
-		/usr/sbin/rcctl restart unbound
+		/usr/sbin/rcctl restart unbound dhcpleased
 	fi
     exit
 }
