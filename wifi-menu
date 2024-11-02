@@ -57,7 +57,7 @@ read_saved() {
 
 conf_create() {
     #/sbin/ifconfig $INT -nwid -nwkey -wpakey down > /dev/null 2>&1
-    /sbin/ifconfig $INT lladdr random up
+    #/sbin/ifconfig $INT lladdr random up
     LIST=$(/sbin/ifconfig $INT scan 2>/dev/null |
                             sed -ne 's/^.*nwid \(.*\) chan .*$/\1/p' | tr -d \" | sed '/^$/d' | sort | uniq )
     i=1
