@@ -1,160 +1,343 @@
 #!/bin/sh
+# OpenBSD WiFi Manager - POSIX sh, doas-friendly
+# Fixes: mtw SIOCSIFLLADDR error, [: N: unexpected operator
 
-# Colors vars
-RED="\033[0;031m"
-BLU="\033[1;34m"
-YLW="\033[1;33m"
-RST="\033[1;0m"
-GRN="\033[32m"
-GRY="\033[37m"
+set -u
 
-INT=$1
+# --- colors ---
+if [ -t 1 ]; then
+    R=$(printf '\033[0;31m'); G=$(printf '\033[0;32m')
+    Y=$(printf '\033[1;33m'); B=$(printf '\033[1;34m')
+    D=$(printf '\033[1;30m'); N=$(printf '\033[0m')
+else
+    R= G= Y= B= D= N=
+fi
+
 WIFI_DIR="/etc/wifi_saved"
+TMP_RAW="/tmp/wifi_raw.$$"
+TMP_PARSED="/tmp/wifi_parsed.$$"
 
-if [ "$(id -u)" != "0" ]; then
-    echo -ne "[!] ${RED}This script needs to be run as root.\n${RST}"
-    exit
+cleanup() { rm -f "$TMP_RAW" "$TMP_PARSED"; }
+trap cleanup EXIT INT TERM
+
+INT="${1:-}"
+SAVED_COUNT=0
+NET_COUNT=0
+
+if [ "$(id -u)" -ne 0 ]; then
+    printf '%b\n' "${R}[!] Run as root: doas $0 [iface]${N}"
+    exit 1
 fi
 
-if [ -z "$1" ]; then
-    echo -ne "[!] ${RED} Usage: doas $0 ${YLW}[interface]${RST}\n"
-    exit
+if [ -z "$INT" ]; then
+    printf '%b\n' "${R}[!] Usage: doas $0 [interface]${N}"
+    exit 1
 fi
 
-read_saved() {
-    #/sbin/ifconfig $INT -inet6 -inet -bssid -chan -nwid -nwkey -wpa -wpakey
-    #/sbin/ifconfig $INT lladdr random
+if ! ifconfig "$INT" >/dev/null 2>&1; then
+    printf '%b\n' "${R}[!] Interface $INT not found${N}"
+    exit 1
+fi
 
-    SAVED_LIST=$(ls -h $WIFI_DIR)
-           if [ -z "${SAVED_LIST[0]}" ]; then
-                 echo -ne "[!] ${YLW}No previous WiFi connections found.\n${RST}"
-                 conf_create
-           fi
+mkdir -p -m 600 "$WIFI_DIR" 2>/dev/null
 
-    i=1
-    for j in ${SAVED_LIST}
-    do
-        echo "$i) $j"
-        file[i]=$j
-        i=$(( i + 1 ))
-    done | column -s '\n' | sed 's@\\|$@\\)\\)@g';echo
-    i=1
-    for j in ${SAVED_LIST}
-    do
-        file[i]=$j
-        i=$(( i + 1 ))
-    done
-    echo -ne "[+] ${BLU}Select a previously saved WiFi connection or press ${YLW}\"Enter\" ${BLU}to skip: ${RST}"
-    read v_CHOOSELIST
-
-    if [ -z "${file[$v_CHOOSELIST]}" ];then
-        conf_create
-    fi
-
-    echo -ne "[+] ${YLW}\"${file[$v_CHOOSELIST]}\" ${BLU}is selected\n${RST}"
-    saved_connect ${file[$v_CHOOSELIST]}
+# ============================================================
+# BANNER
+# ============================================================
+banner() {
+    clear
+    echo -ne "$G   .;'                     \`;,            \n"
+    echo -ne "$G  .;'  ,;'             \`;,  \`;,    OpenBSD Wireless Network Management Script\n"
+    echo -ne "$G .;'  ,;'  ,;'     \`;,  \`;,  \`;,   OS        :$N`uname -srm`\n"
+    echo -ne "$G ::   ::   :   $G( ) $G  :   ::   ::   SHELL     :$N${SHELL##*/}   \n"
+    echo -ne "$G ':.  ':.  ':. $G/_\\ $G,:'  ,:'  ,:'   TERM      :$N$TERM  \n"
+    echo -ne "$G  ':.  ':.    $G/___\\ $G   ,:'  ,:'    PC        :$N`sysctl -n hw.vendor` `sysctl -n hw.product`\n"
+    echo -ne "$G   ':.       $G/_____\\ $G     ,:'      Saved dir : ${N}$WIFI_DIR\n"
+    echo -ne "$G            $G/       \\ $G    ${N}\n\n"
 }
 
-conf_create() {
-    #/sbin/ifconfig $INT -nwid -nwkey -wpakey down > /dev/null 2>&1
-    #/sbin/ifconfig $INT lladdr random up
-    LIST=$(/sbin/ifconfig $INT scan 2>/dev/null |
-                            sed -ne 's/^.*nwid \(.*\) chan .*$/\1/p' | tr -d \" | sed '/^$/d' | sort | uniq )
-    i=1
-    for j in $LIST
-    do
-        echo "$i) $j"
-        list[i]=$j
-        i=$(( i + 1 ))
-    done | column -s '\n' |sed 's@\\|$@\\)\\)@g';echo
+# ---- MAC randomization probe ----
+MAC_RND=0
+if ifconfig "$INT" lladdr random >/dev/null 2>&1; then
+    MAC_RND=1
+else
+    printf '%b\n' "${Y}[i] $INT: MAC randomization not supported (continuing)${N}"
+fi
 
-    if [ -z "${LIST[0]}" ]; then
-		echo -ne "[!] ${RED}No available wifi connection using $INT\n${RST}"
-		exit
+apply_mac_random() {
+    [ "$MAC_RND" -eq 1 ] && ifconfig "$INT" lladdr random 2>/dev/null
+    return 0
+}
+
+# ---- current SSID ----
+current_ssid() {
+    ifconfig "$INT" 2>/dev/null | sed -n 's/.*ieee80211: nwid \([^ ]*\).*/\1/p'
+}
+
+# ============================================================
+# SAVED NETWORKS
+# ============================================================
+list_saved() {
+    ls -1 "$WIFI_DIR" 2>/dev/null | grep "\.${INT}$" | sort
+}
+
+get_saved_file() {
+    list_saved | sed -n "${1}p"
+}
+
+show_saved() {
+    SAVED_COUNT=0
+    saved=$(list_saved)
+    if [ -z "$saved" ]; then
+        return 1
     fi
+    printf '\n'
+    printf '%b\n' "${D}     #  Saved Networks for $INT${N}"
+    printf '%b\n' "${D}     -- ----------------------------------------${N}"
     i=1
-    for j in $LIST
-    do
-       list[i]=$j
-       i=$(( i + 1 ))
+    printf '%s\n' "$saved" | while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        ssid=$(printf '%s' "$f" | sed "s/\.${INT}$//")
+        printf '    %2d) %s\n' "$i" "$ssid"
+        i=$((i + 1))
     done
-
-    echo -ne "[+] ${BLU}Select a WiFi connection or press ${YLW}\"Enter\" ${BLU}to exit: ${RST}"
-    read i_CHOOSELIST
-
-    if [ -z "${list[$i_CHOOSELIST]}" ]; then
-        echo -ne "[!] ${RED}Exiting\n${RST}"
-        exit
-    fi
-        echo -ne "[+] ${BLU}Please enter the passphrase for ${YLW}\"${list[$i_CHOOSELIST]}\"?\n${RST}"
-        echo -ne "[+] Password: "
-        stty -echo
-        read  PASSWORD
-        stty echo
-
-    if [ ${#PASSWORD} -lt 8 ];then
-        echo -ne "\n[!] ${RED}wpakey:${YLW} passphrase must be between 8 and 63 characters${RST}\n"
-        exit
-    fi
-
-echo "lladdr random join ${list[$i_CHOOSELIST]} wpakey $PASSWORD
-inet autoconf
-up" > "$WIFI_DIR/${list[$i_CHOOSELIST]}.$INT" | xargs
-chmod 600 $WIFI_DIR/${list[$i_CHOOSELIST]}.$INT
-
-    echo -ne "[+] ${BLU}Creating new configuration for the ${YLW}\"${list[$i_CHOOSELIST]}\"${RST}${BLU} wireless network.\n${RST}"
-    connect "${list[$i_CHOOSELIST]}"
+    SAVED_COUNT=$(printf '%s\n' "$saved" | wc -l | tr -d ' ')
+    printf '\n'
+    return 0
 }
 
 saved_connect() {
-    echo -ne "[+] ${BLU}Connecting using the ${YLW}\"${file[$v_CHOOSELIST]}\"${RST}${BLU} configuration file.${RST}\n"
-    /sbin/ifconfig $INT lladdr random up
-    /sbin/ifconfig $INT lladdr random nwid "$(grep join "$WIFI_DIR/${file[$v_CHOOSELIST]}" | head -1 |
-            awk '{print $4}' )" wpakey "$(grep  wpakey "$WIFI_DIR/${file[$v_CHOOSELIST]}"  |
-            head -1| awk '{print $6}')"
-    /bin/cp "$WIFI_DIR/${file[$v_CHOOSELIST]}" /etc/hostname.$INT
-    /bin/chmod 0600 /etc/hostname.$INT
-    echo -ne "[+] ${BLU}Interface ${YLW}$INT${BLU} has been configured the ESSID is ${YLW}\"${file[$v_CHOOSELIST]}\"${RST}"
-    echo -ne "\n[+] ${BLU}Interface ${YLW}$INT${BLU} is now up${RST}\n"
-    echo -ne "[+] ${BLU}Running ${YLW}dhcpleasectl\n${RST}"
-    /usr/sbin/dhcpleasectl $INT
-	if [[ $(rcctl ls all|grep dnscrypt_proxy) == *dnscrypt* ]];then
-		/usr/sbin/rcctl restart dnscrypt_proxy unbound dhcpleased
-    else 
-		/usr/sbin/rcctl restart unbound dhcpleased
-	fi
-    exit
+    f="$1"
+    path="$WIFI_DIR/$f"
+
+    if [ ! -f "$path" ]; then
+        printf '%b\n' "${R}[!] File not found: $path${N}"
+        return 1
+    fi
+
+    # Parse ESSID — works with or without "lladdr random" line
+    ssid=$(sed -n 's/^join \(.*\) wpakey .*/\1/p; s/^join \(.*\)$/\1/p' "$path" | head -1)
+    pass=$(sed -n 's/^join .* wpakey \(.*\)$/\1/p' "$path" | head -1)
+
+    if [ -z "$ssid" ]; then
+        printf '%b\n' "${R}[!] Cannot parse saved file: $path${N}"
+        return 1
+    fi
+
+    printf '%b\n' "${B}[+] Connecting to saved network \"$ssid\"...${N}"
+    do_connect "$ssid" "$pass"
+    return 0
 }
 
-connect() {
-    ESSID=$*
-    echo -ne "[+] ${BLU}Connecting using file ${YLW}\"$ESSID\"${RST}\n"
-    /sbin/ifconfig $INT lladdr random up
-    /bin/cp "$WIFI_DIR/${list[$i_CHOOSELIST]}.$INT" /etc/hostname.$INT
-    /bin/chmod 0600 /etc/hostname.$INT
-    echo -ne "[+] ${BLU}Interface ${YLW}$INT${BLU} has been configured the ESSID is ${YLW}\"$ESSID\"${RST}"
-    /sbin/ifconfig $INT nwid "$ESSID" wpakey "$PASSWORD" lladdr random up
-    echo -ne "\n[+] ${BLU}Interface ${YLW}$INT${BLU} is now up${RST}\n"
-    echo -ne "[+] ${BLU}Running ${YLW}dhcpleasectl${RST}\n"
-    /usr/sbin/dhcpleasectl $INT
-	if [[ $(rcctl ls all|grep dnscrypt_proxy) == *dnscrypt* ]];then
-		/usr/sbin/rcctl restart dnscrypt_proxy unbound dhcpleased
-    else 
-		/usr/sbin/rcctl restart unbound dhcpleased
-	fi
-    exit
+# ============================================================
+# SCAN
+# ============================================================
+scan_networks() {
+    ifconfig "$INT" up 2>/dev/null
+    ifconfig "$INT" scan 2>/dev/null > "$TMP_RAW"
+    : > "$TMP_PARSED"
+    while IFS= read -r line; do
+        case "$line" in
+            *"nwid "*) ;;
+            *) continue ;;
+        esac
+        ssid=$(printf '%s\n' "$line" | sed -n 's/^[[:space:]]*nwid \(.*\) chan [0-9][0-9]* bssid .*/\1/p')
+        ssid=$(printf '%s' "$ssid" | sed 's/^"//; s/"$//')
+        [ -z "$ssid" ] && continue
+
+        sig=$(printf '%s\n' "$line" | sed -n 's/.*bssid [^ ]* \([^ ]*\).*/\1/p')
+        [ -z "$sig" ] && sig="?"
+
+        case "$line" in
+            *wpa3*wpa2*) sec="WPA2/WPA3" ;;
+            *wpa3*)      sec="WPA3" ;;
+            *wpa2*)      sec="WPA2" ;;
+            *wpa1*)      sec="WPA1" ;;
+            *wep*|*privacy*) sec="WEP" ;;
+            *) sec="Open" ;;
+        esac
+        printf '%s|%s|%s\n' "$ssid" "$sig" "$sec" >> "$TMP_PARSED"
+    done < "$TMP_RAW"
 }
 
-### wifite.py ###
-clear
-echo -ne "$GRN   .;'                     \`;,            \n"
-echo -ne "$GRN  .;'  ,;'             \`;,  \`;,    OpenBSD Wireless Network Management Script\n"
-echo -ne "$GRN .;'  ,;'  ,;'     \`;,  \`;,  \`;,   OS      :$RST`uname -srm`\n"
-echo -ne "$GRN ::   ::   :   $GRY( ) $GRN  :   ::   ::   SHELL   :$RST${SHELL##*/}   \n"
-echo -ne "$GRN ':.  ':.  ':. $GRY/_\\ $GRN,:'  ,:'  ,:'   TERM    :$RST$TERM  \n"
-echo -ne "$GRN  ':.  ':.    $GRY/___\\ $GRN   ,:'  ,:'    PC      :$RST`sysctl -n hw.vendor` `sysctl -n hw.product`\n"
-echo -ne "$GRN   ':.       $GRY/_____\\ $GRN     ,:'     \n"
-echo -ne "$GRN            $GRY/       \\ $GRN    ${RST}\n\n"
+show_table() {
+    cur=$(current_ssid)
+    if [ -n "$cur" ]; then
+        printf '%b\n' "${G}[●] Currently connected: $cur${N}"
+    fi
+    printf '\n'
+    printf '%b\n' "${D}     #  Network Name                             Signal  Security${N}"
+    printf '%b\n' "${D}     -- ---------------------------------------- ------ ----------${N}"
+    i=1
+    while IFS='|' read -r ssid sig sec; do
+        marker="  "
+        [ "$ssid" = "$cur" ] && marker="* "
+        printf '  %s%2d) %-40s %-7s %s\n' "$marker" "$i" "$ssid" "$sig" "$sec"
+        i=$((i + 1))
+    done < "$TMP_PARSED"
+    NET_COUNT=$((i - 1))
+    printf '\n'
+}
 
-[[ -d $WIFI_DIR ]] || mkdir -p -m 600 $WIFI_DIR
-read_saved
+get_field() {
+    awk -F'|' -v n="$1" -v f="$2" 'NR==n{print $f}' "$TMP_PARSED"
+}
+
+# ============================================================
+# CONNECT / SAVE / DISCONNECT
+# ============================================================
+do_connect() {
+    ssid="$1"; pass="$2"
+    printf '%b\n' "${B}[+] Connecting to \"$ssid\"...${N}"
+    apply_mac_random
+    ifconfig "$INT" up 2>/dev/null
+    ifconfig "$INT" -nwid 2>/dev/null
+    if [ -n "$pass" ]; then
+        ifconfig "$INT" nwid "$ssid" wpakey "$pass"
+    else
+        ifconfig "$INT" nwid "$ssid"
+    fi
+    ifconfig "$INT" inet autoconf 2>/dev/null
+    printf '%b\n' "${B}[+] DHCP request sent (dhcpleased)${N}"
+    printf '%b\n' "${B}[+] Waiting for IP...${N}"
+
+    i=0
+    while [ "$i" -lt 15 ]; do
+        sleep 1
+        if ifconfig "$INT" 2>/dev/null | grep -q 'inet '; then
+            ip=$(ifconfig "$INT" 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p' | head -1)
+            printf '%b\n' "${G}[✓] Connected! IP: $ip${N}"
+            return 0
+        fi
+        i=$((i + 1))
+    done
+    printf '%b\n' "${Y}[!] Associated but no IP yet${N}"
+}
+
+save_config() {
+    ssid="$1"; pass="$2"
+    target="$WIFI_DIR/${ssid}.${INT}"
+    {
+        [ "$MAC_RND" -eq 1 ] && printf 'lladdr random\n'
+        if [ -n "$pass" ]; then
+            printf 'join %s wpakey %s\n' "$ssid" "$pass"
+        else
+            printf 'join %s\n' "$ssid"
+        fi
+        printf 'inet autoconf\nup\n'
+    } > "$target"
+    chmod 600 "$target"
+    printf '%b\n' "${G}[+] Saved: $target${N}"
+}
+
+disconnect() {
+    printf '%b\n' "${B}[+] Disconnecting $INT...${N}"
+    ifconfig "$INT" -inet autoconf 2>/dev/null
+    ifconfig "$INT" -nwid 2>/dev/null
+    ifconfig "$INT" down 2>/dev/null
+    printf '%b\n' "${G}[✓] Disconnected${N}"
+}
+
+# ============================================================
+# MENU
+# ============================================================
+menu() {
+    mode="saved"
+    first_run=1
+
+    while :; do
+        # ---------------- SAVED MODE ----------------
+        if [ "$mode" = "saved" ]; then
+            if show_saved; then
+                printf '%b' "${Y}Enter saved #, s=scan new, d=disconnect, q=quit: ${N}"
+                read choice
+
+                case "$choice" in
+                    q|Q) exit 0 ;;
+                    s|S) mode="scan"; continue ;;
+                    d|D) disconnect; continue ;;
+                    ''|*[!0-9]*)
+                        printf '%b\n' "${R}[!] Invalid choice${N}"
+                        continue
+                        ;;
+                esac
+
+                if [ "$choice" -ge 1 ] && [ "$choice" -le "$SAVED_COUNT" ]; then
+                    f=$(get_saved_file "$choice")
+                    saved_connect "$f"
+                    return 0
+                fi
+                printf '%b\n' "${R}[!] Invalid choice${N}"
+                continue
+            else
+                if [ "$first_run" -eq 1 ]; then
+                    printf '%b\n' "${Y}[!] No saved networks in $WIFI_DIR${N}"
+                    printf '%b\n' "${Y}    Scanning automatically...${N}"
+                else
+                    printf '%b\n' "${Y}[!] No saved networks${N}"
+                fi
+                first_run=0
+                mode="scan"
+                continue
+            fi
+        fi
+
+        # ---------------- SCAN MODE ----------------
+        printf '%b\n' "${B}[+] Scanning on $INT...${N}"
+        scan_networks
+        show_table
+
+        if [ "$NET_COUNT" -eq 0 ]; then
+            printf '%b\n' "${Y}[!] No networks found${N}"
+        fi
+
+        printf '%b' "${Y}Enter #, s=saved, r=rescan, d=disconnect, q=quit: ${N}"
+        read choice
+
+        case "$choice" in
+            q|Q) exit 0 ;;
+            r|R) continue ;;
+            s|S) mode="saved"; continue ;;
+            d|D) disconnect; continue ;;
+            ''|*[!0-9]*)
+                printf '%b\n' "${R}[!] Invalid choice${N}"
+                continue
+                ;;
+        esac
+
+        if [ "$choice" -ge 1 ] && [ "$choice" -le "$NET_COUNT" ]; then
+            ssid=$(get_field "$choice" 1)
+            sec=$(get_field "$choice" 3)
+
+            if [ "$sec" = "Open" ]; then
+                do_connect "$ssid" ""
+                save_config "$ssid" ""
+                return 0
+            fi
+
+            printf '%b\n' "${Y}[+] Passphrase for \"$ssid\":${N}"
+            printf '%b' "    Password: "
+            stty -echo 2>/dev/null
+            read pass
+            stty echo 2>/dev/null
+            printf '\n'
+
+            if [ "${#pass}" -lt 8 ]; then
+                printf '%b\n' "${R}[!] WPA passphrase must be 8-63 chars${N}"
+                continue
+            fi
+
+            do_connect "$ssid" "$pass"
+            save_config "$ssid" "$pass"
+            return 0
+        fi
+
+        printf '%b\n' "${R}[!] Invalid choice${N}"
+    done
+}
+
+# ============================================================
+# RUN
+# ============================================================
+banner
+menu
